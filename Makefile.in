@@ -1,0 +1,10 @@
+MODULE    = hantek.sys
+IMPORTS   = ntoskrnl usb-1.0.
+#IMPORTS   = ntoskrnl
+EXTRAINCL = -I/usr/include/
+
+#EXTRADLLFLAGS = -mno-cygwin -Wl,--subsystem,native
+EXTRADLLFLAGS = -Wl,--subsystem,native
+
+C_SRCS = \
+	main.c

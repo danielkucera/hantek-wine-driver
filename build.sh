@@ -1,8 +1,12 @@
 #!/bin/bash -e
 
-( cd ../../ && ./configure --enable-win64 && make dlls/hantek.sys )
+if [ ! -f Makefile ]
+then
+  ( cd ../../ && ./configure --enable-win64 && make dlls/hantek.sys )
+fi
 
-#make
+make
+
 sudo cp hantek.sys.so /usr/lib/x86_64-linux-gnu/wine/
 cp hantek.sys.fake ~/.wine/drive_c/windows/system32/drivers/hantek.sys
 #wine sc delete Hantek

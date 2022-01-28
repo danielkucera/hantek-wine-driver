@@ -43,6 +43,7 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation( irp );
 
     int r;
+    int requestTimeout = 5000;
 
     TRACE( "ioctl %x insize %u outsize %u\n",
            irpsp->Parameters.DeviceIoControl.IoControlCode,
@@ -63,7 +64,7 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
 		uint16_t wValue = indata[6] + indata[7] * 0x100;
 		uint16_t wIndex = indata[8] + indata[9] * 0x100;
 		if (indata[0]) {
-			r = libusb_control_transfer(usbdev, bmRequestType, bRequest, wValue, wIndex, (unsigned char*)irp->UserBuffer, (uint16_t)irpsp->Parameters.DeviceIoControl.OutputBufferLength, 1000);
+			r = libusb_control_transfer(usbdev, bmRequestType, bRequest, wValue, wIndex, (unsigned char*)irp->UserBuffer, (uint16_t)irpsp->Parameters.DeviceIoControl.OutputBufferLength, requestTimeout);
     			TRACE("control read reqlen %d readlen %d %s\n", irpsp->Parameters.DeviceIoControl.OutputBufferLength, r, wine_dbgstr_an(irp->UserBuffer, r));
 			if (r < 0) {
 				irp->IoStatus.Information = 0;
@@ -73,21 +74,21 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
 
 			irp->IoStatus.Status = STATUS_SUCCESS;
 		} else {
-			r = libusb_control_transfer(usbdev, bmRequestType, bRequest, wValue, wIndex, (unsigned char*)irp->UserBuffer, (uint16_t)irpsp->Parameters.DeviceIoControl.OutputBufferLength, 1000);
+			r = libusb_control_transfer(usbdev, bmRequestType, bRequest, wValue, wIndex, (unsigned char*)irp->UserBuffer, (uint16_t)irpsp->Parameters.DeviceIoControl.OutputBufferLength, requestTimeout);
 			irp->IoStatus.Information = 0;
 			irp->IoStatus.Status = STATUS_SUCCESS;
 		}
 		break;
 	case 0x222051:
     		TRACE( "write bulk\n" );
-		r = libusb_bulk_transfer(usbdev, 0x02, (unsigned char*)irp->UserBuffer, irpsp->Parameters.DeviceIoControl.OutputBufferLength, &transferSize, 1000);
+		r = libusb_bulk_transfer(usbdev, 0x02, (unsigned char*)irp->UserBuffer, irpsp->Parameters.DeviceIoControl.OutputBufferLength, &transferSize, requestTimeout);
     		TRACE("write bulk reqlen %d writelen %d\n", irpsp->Parameters.DeviceIoControl.OutputBufferLength, transferSize);
 		irp->IoStatus.Information = 0;
 		irp->IoStatus.Status = STATUS_SUCCESS;
 		break;
 	case 0x22204e:
     		TRACE( "read bulk\n" );
-		r = libusb_bulk_transfer(usbdev, 0x86, (unsigned char*)irp->UserBuffer, irpsp->Parameters.DeviceIoControl.OutputBufferLength, &transferSize, 1000);
+		r = libusb_bulk_transfer(usbdev, 0x86, (unsigned char*)irp->UserBuffer, irpsp->Parameters.DeviceIoControl.OutputBufferLength, &transferSize, requestTimeout);
     		TRACE("read bulk reqlen %d readlen %d %s\n", irpsp->Parameters.DeviceIoControl.OutputBufferLength, transferSize, wine_dbgstr_an(irp->UserBuffer, r));
 		irp->IoStatus.Information = transferSize;
 		irp->IoStatus.Status = STATUS_SUCCESS;

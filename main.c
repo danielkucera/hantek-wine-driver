@@ -28,15 +28,33 @@
 #include "ddk/wdm.h"
 #include "wine/debug.h"
 #include "winioctl.h"
+#include <stdint.h>
 
-#include <libusb-1.0/libusb.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+
+#include <errno.h>
 
 #define VENDOR_REQUEST 0x40
 #define DEVICE_TO_HOST 0x80
 
+#define PORT 8484
+
+int sock = 0, client_fd;
+
 WINE_DEFAULT_DEBUG_CHANNEL(hantek);
 
-libusb_device_handle *usbdev;
+struct __attribute__((__packed__)) hantekCommand {
+    uint32_t io_code;
+    uint16_t input_len;
+    uint16_t output_len;
+};
+
+struct __attribute__((__packed__)) hantekResponse {
+    uint8_t ret_val;
+    uint16_t input_len;
+    uint16_t output_len;
+};
 
 static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
 {
@@ -55,51 +73,72 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
     uint8_t* indata = irp->AssociatedIrp.SystemBuffer;
 
     int transferSize;
-    switch(irpsp->Parameters.DeviceIoControl.IoControlCode) {
-	case 0x222059:
-    		TRACE( "control transfer\n" );
-		// libusb_control_transfer(libusb_device_handle *dev_handle, uint8_t bmRequestType, uint8_t bRequest, uint16_t wValue, uint16_t wIndex,	unsigned char *data, uint16_t wLength, unsigned int timeout)
-		uint8_t bmRequestType = VENDOR_REQUEST + DEVICE_TO_HOST * (indata[0] == 1);
-		uint8_t bRequest = indata[4];
-		uint16_t wValue = indata[6] + indata[7] * 0x100;
-		uint16_t wIndex = indata[8] + indata[9] * 0x100;
-		if (indata[0]) {
-			r = libusb_control_transfer(usbdev, bmRequestType, bRequest, wValue, wIndex, (unsigned char*)irp->UserBuffer, (uint16_t)irpsp->Parameters.DeviceIoControl.OutputBufferLength, requestTimeout);
-    			TRACE("control read reqlen %d readlen %d %s\n", irpsp->Parameters.DeviceIoControl.OutputBufferLength, r, wine_dbgstr_an(irp->UserBuffer, r));
-			if (r < 0) {
-				irp->IoStatus.Information = 0;
-			} else {
-				irp->IoStatus.Information = r;
-			}
 
-			irp->IoStatus.Status = STATUS_SUCCESS;
-		} else {
-			r = libusb_control_transfer(usbdev, bmRequestType, bRequest, wValue, wIndex, (unsigned char*)irp->UserBuffer, (uint16_t)irpsp->Parameters.DeviceIoControl.OutputBufferLength, requestTimeout);
-			irp->IoStatus.Information = 0;
-			irp->IoStatus.Status = STATUS_SUCCESS;
-		}
-		break;
-	case 0x222051:
-    		TRACE( "write bulk\n" );
-		r = libusb_bulk_transfer(usbdev, 0x02, (unsigned char*)irp->UserBuffer, irpsp->Parameters.DeviceIoControl.OutputBufferLength, &transferSize, requestTimeout);
-    		TRACE("write bulk reqlen %d writelen %d\n", irpsp->Parameters.DeviceIoControl.OutputBufferLength, transferSize);
-		irp->IoStatus.Information = 0;
-		irp->IoStatus.Status = STATUS_SUCCESS;
-		break;
-	case 0x22204e:
-    		TRACE( "read bulk\n" );
-		r = libusb_bulk_transfer(usbdev, 0x86, (unsigned char*)irp->UserBuffer, irpsp->Parameters.DeviceIoControl.OutputBufferLength, &transferSize, requestTimeout);
-    		TRACE("read bulk reqlen %d readlen %d %s\n", irpsp->Parameters.DeviceIoControl.OutputBufferLength, transferSize, wine_dbgstr_an(irp->UserBuffer, r));
-		irp->IoStatus.Information = transferSize;
-		irp->IoStatus.Status = STATUS_SUCCESS;
-		break;
-	default:
-    		TRACE( "------ unhandled ioctl --------\n" );
+    struct hantekCommand cmd;
+    cmd.io_code = irpsp->Parameters.DeviceIoControl.IoControlCode;
+    cmd.input_len = irpsp->Parameters.DeviceIoControl.InputBufferLength;
+    cmd.output_len = irpsp->Parameters.DeviceIoControl.OutputBufferLength;
+
+    send(sock, &cmd, sizeof(cmd), 0);
+    send(sock, irp->AssociatedIrp.SystemBuffer, cmd.input_len, 0);
+    send(sock, irp->UserBuffer, cmd.output_len, 0);
+
+    struct hantekResponse res;
+    int valread;
+
+    valread = recv(sock, &res, sizeof(res), MSG_WAITALL);
+    TRACE("res len: %d ret: %d in_len: %d, out_len:%d \n", valread, res.ret_val, res.input_len, res.output_len);
+    if(valread != sizeof(res)){
+	    TRACE("short header, len %d\n", valread);
+	    return STATUS_PIPE_NOT_AVAILABLE;
     }
+
+    if (res.input_len) {
+        valread = recv(sock, irp->AssociatedIrp.SystemBuffer, res.input_len, MSG_WAITALL);
+        if(valread != res.input_len){
+    	    TRACE("short in_data\n");
+    	    return STATUS_PIPE_NOT_AVAILABLE;
+        }
+    }
+
+    if (res.output_len) {
+        valread = recv(sock, (unsigned char*)irp->UserBuffer, res.output_len, MSG_WAITALL);
+        if(valread != res.output_len){
+    	    TRACE("short out_data len: %d %s\n", valread, strerror(errno));
+    	    return STATUS_PIPE_NOT_AVAILABLE;
+        }
+    }
+
+    irp->IoStatus.Information = res.output_len + res.input_len;
+    irp->IoStatus.Status = res.ret_val;
 
     TRACE( "------ IOCTL COMPLETE --------\n" );
     IoCompleteRequest( irp, IO_NO_INCREMENT );
     return STATUS_SUCCESS;
+}
+
+int hantek_connect(){
+    struct sockaddr_in serv_addr;
+
+    if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+    	TRACE("Socket creation error");
+	return -1;
+    }
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(PORT);
+
+    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
+        TRACE("Invalid address/ Address not supported");
+        return -1;
+    }
+
+    if ((client_fd = connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr))) < 0) {
+        printf("Connection Failed");
+        return -1;
+    }
+
+    return 0;
 }
 
 NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
@@ -108,27 +147,13 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
     UNICODE_STRING nameW, dos_nameW;
     DEVICE_OBJECT *device;
 
+    if (hantek_connect()){
+    	return STATUS_DEVICE_DOES_NOT_EXIST;
+    }
+
     // d6CDE-0
     static const WCHAR hantek_deviceW[] = {'\\','D','e','v','i','c','e','\\','d','6','C','D','E','-','0',0};
     static const WCHAR hantek_dos_deviceW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','d','6','C','D','E','-','0',0};
-
-    
-    const struct libusb_version* version;
-    int r;
-    version = libusb_get_version();
-    TRACE("Using libusb v%d.%d.%d.%d\n\n", version->major, version->minor, version->micro, version->nano);
-    r = libusb_init(NULL);
-    if (r < 0) {
-    	TRACE("libusb_init failed with code %d\n", r);
-	    return STATUS_INVALID_PARAMETER;
-    }
-
-    usbdev = libusb_open_device_with_vid_pid(NULL, 0x04b5, 0x6cde);
-
-    if (usbdev == NULL) {
-    	TRACE("hantek device not found\n");
-	return STATUS_DEVICE_DOES_NOT_EXIST;
-    }
 
     TRACE( "(%p, %s) hantek\n", driver, debugstr_w(path->Buffer) );
     TRACE( "create device hantek (%s) dos device (%s)\n", debugstr_w(hantek_deviceW), debugstr_w(hantek_dos_deviceW));

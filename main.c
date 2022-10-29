@@ -62,8 +62,9 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
 {
     IO_STACK_LOCATION *irpsp = IoGetCurrentIrpStackLocation( irp );
 
-    int r;
-    int requestTimeout = 5000;
+    struct hantekCommand cmd;
+    struct hantekResponse res;
+    int valread;
 
     TRACE( "ioctl %x insize %u outsize %u\n",
            irpsp->Parameters.DeviceIoControl.IoControlCode,
@@ -72,11 +73,6 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
     TRACE("outdata %s\n", wine_dbgstr_an(irp->UserBuffer, irpsp->Parameters.DeviceIoControl.OutputBufferLength));
     TRACE("indata %s\n", wine_dbgstr_an(irp->AssociatedIrp.SystemBuffer, irpsp->Parameters.DeviceIoControl.InputBufferLength));
 
-    uint8_t* indata = irp->AssociatedIrp.SystemBuffer;
-
-    int transferSize;
-
-    struct hantekCommand cmd;
     cmd.io_code = irpsp->Parameters.DeviceIoControl.IoControlCode;
     cmd.input_len = irpsp->Parameters.DeviceIoControl.InputBufferLength;
     cmd.output_len = irpsp->Parameters.DeviceIoControl.OutputBufferLength;
@@ -84,9 +80,6 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
     send(sock, &cmd, sizeof(cmd), 0);
     send(sock, irp->AssociatedIrp.SystemBuffer, cmd.input_len, 0);
     send(sock, irp->UserBuffer, cmd.output_len, 0);
-
-    struct hantekResponse res;
-    int valread;
 
     valread = recv(sock, &res, sizeof(res), MSG_WAITALL);
     TRACE("res len: %d ret: %d in_len: %d, out_len:%d \n", valread, res.ret_val, res.input_len, res.output_len);
@@ -119,16 +112,17 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
     return STATUS_SUCCESS;
 }
 
-int hantek_connect(){
+int hantek_connect(void) {
     struct sockaddr_in serv_addr;
     int hantek_port = DEFAULT_PORT;
 
-    char* hantek_port_var = getenv("HANTEK_PORT");
+    const char* hantek_port_var = getenv("HANTEK_PORT");
+    const char* hantek_host_var = getenv("HANTEK_HOST");
+
     if(hantek_port_var) {
         hantek_port = atoi(hantek_port_var);
     }
 
-    char* hantek_host_var = getenv("HANTEK_HOST");
     if(!hantek_host_var)
         hantek_host_var = DEFAULT_HOST;
 
@@ -161,13 +155,13 @@ NTSTATUS WINAPI DriverEntry( DRIVER_OBJECT *driver, UNICODE_STRING *path )
     UNICODE_STRING nameW, dos_nameW;
     DEVICE_OBJECT *device;
 
-    if (hantek_connect()){
-    	return STATUS_DEVICE_DOES_NOT_EXIST;
-    }
-
     // d6CDE-0
     static const WCHAR hantek_deviceW[] = {'\\','D','e','v','i','c','e','\\','d','6','C','D','E','-','0',0};
     static const WCHAR hantek_dos_deviceW[] = {'\\','D','o','s','D','e','v','i','c','e','s','\\','d','6','C','D','E','-','0',0};
+
+    if (hantek_connect()){
+    	return STATUS_DEVICE_DOES_NOT_EXIST;
+    }
 
     TRACE( "(%p, %s) hantek\n", driver, debugstr_w(path->Buffer) );
     TRACE( "create device hantek (%s) dos device (%s)\n", debugstr_w(hantek_deviceW), debugstr_w(hantek_dos_deviceW));

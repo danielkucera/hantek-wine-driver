@@ -6,13 +6,13 @@ import time
 import usb.core
 import usb.util
 
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 8484
 
 VENDOR_REQUEST=0x40
 DEVICE_TO_HOST=0x80
 
-def log(*args, **kwargs):
+def debug(*args, **kwargs):
     pass
 
 class Device:
@@ -54,12 +54,11 @@ class Device:
 
     # USB communication
     def ctrl(self, rtype, req, data, error=None, wValue=0, wIndex=0):
-        log("ctrl", rtype, req, data, wValue, wIndex)
-        #log(data.hex())
+        debug("ctrl", rtype, req, data, wValue, wIndex)
         try:
             ret = self.dev.ctrl_transfer(rtype, req, wValue, wIndex, data)
         except usb.core.USBError as e:
-            log("got", e.errno, e)
+            print("got", e.errno, e)
             if e.errno == error:
                 return
             else:
@@ -77,11 +76,11 @@ class Device:
 
 
 def process_cmd(io_num, indata, outdata):
-    log("--- process ---")
+    debug("--- process ---")
     status = 0
     in_data = b""
     out_data = b""
-    log(hex(io_num))
+    debug(hex(io_num))
     if io_num == 0x222059:
         devToHost = (indata[0] == 1)
         bmRequestType = VENDOR_REQUEST + DEVICE_TO_HOST * devToHost;
@@ -91,35 +90,20 @@ def process_cmd(io_num, indata, outdata):
         error = None
         if bRequest == 234:
             error = 32
-        if bRequest == 11179:
-            error = 110
-        if bRequest == 11178:
-            error = 110
-        log(indata[0])
-        if devToHost:
-            log("devToHos")
-        else:
-            log("hostToDev")
         try:
             if devToHost:
                 out_data = device.ctrl(bmRequestType, bRequest, len(outdata), error=error, wValue=wValue, wIndex=wIndex)
-                out_data = bytearray(out_data) + bytearray([ 0 ] * (len(outdata) - len(out_data)))
-                log(len(outdata), out_data)
             else:
                 device.ctrl(bmRequestType, bRequest, outdata, error=error, wValue=wValue, wIndex=wIndex)
         except Exception as e:
-            log(e)
+            print(e)
             status = 1;
-        if bRequest == 11234:
-            time.sleep(2)
-
     elif io_num == 0x222051:
-        log("bwrite", outdata)
+        debug("bwrite", outdata)
         device.bwrite(outdata, without_rst=True)
     elif io_num == 0x22204e:
-        log("bread")
         to_read = len(outdata)
-        log(to_read)
+        debug("bread", to_read)
         try:
             out_data = device.bread(to_read)
         except:
@@ -128,7 +112,7 @@ def process_cmd(io_num, indata, outdata):
     if not out_data:
         out_data = b""
     ret = (status, in_data, out_data)
-    log(ret)
+    debug(ret)
     return ret
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -140,29 +124,24 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
 
         conn, addr = s.accept()
         with conn:
-            log(f"Connected by {addr}")
+            print(f"Connected by {addr}")
             try:
                 device = Device()
                 while True:
                     data = conn.recv(8)
                     (io_num, in_len, out_len) = cmd_head = struct.unpack("<IHH", data)
-                    log(cmd_head)
+                    debug(cmd_head)
                     in_data = conn.recv(in_len)
                     out_data = conn.recv(out_len)
         
                     (status, in_data, out_data) = process_cmd(io_num, in_data, out_data)
                     res_head = struct.pack("<BHH", status, len(in_data), len(out_data))
-                    log("sending", res_head)
+                    debug("sending", res_head)
                     conn.send(res_head)
                     if len(in_data) > 0:
                         conn.send(in_data)
                     if len(out_data) > 0:
                         conn.send(out_data)
-                    
-        
-                    #if not data:
-                    #    break
-                    #conn.sendall(data)
             except struct.error as e:
                 print(e)
     

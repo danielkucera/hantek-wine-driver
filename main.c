@@ -34,11 +34,13 @@
 #include <arpa/inet.h>
 
 #include <errno.h>
+#include <stdlib.h>
 
 #define VENDOR_REQUEST 0x40
 #define DEVICE_TO_HOST 0x80
 
-#define PORT 8484
+#define DEFAULT_PORT 8484
+#define DEFAULT_HOST "127.0.0.1"
 
 int sock = 0, client_fd;
 
@@ -119,22 +121,34 @@ static NTSTATUS WINAPI hantek_ioctl( DEVICE_OBJECT *device, IRP *irp )
 
 int hantek_connect(){
     struct sockaddr_in serv_addr;
+    int hantek_port = DEFAULT_PORT;
+
+    char* hantek_port_var = getenv("HANTEK_PORT");
+    if(hantek_port_var) {
+        hantek_port = atoi(hantek_port_var);
+    }
+
+    char* hantek_host_var = getenv("HANTEK_HOST");
+    if(!hantek_host_var)
+        hantek_host_var = DEFAULT_HOST;
 
     if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
-    	TRACE("Socket creation error");
+        ERR("Socket creation error");
 	return -1;
     }
 
     serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(PORT);
+    serv_addr.sin_port = htons(hantek_port);
 
-    if (inet_pton(AF_INET, "127.0.0.1", &serv_addr.sin_addr) <= 0) {
-        TRACE("Invalid address/ Address not supported");
+    ERR("Hantek connecting to %s:%d\n", hantek_host_var, hantek_port);
+
+    if (inet_pton(AF_INET, hantek_host_var, &serv_addr.sin_addr) <= 0) {
+        ERR("Invalid address/ Address not supported %s\n", hantek_host_var);
         return -1;
     }
 
     if ((client_fd = connect(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr))) < 0) {
-        printf("Connection Failed");
+        ERR("Connection Failed\n");
         return -1;
     }
 

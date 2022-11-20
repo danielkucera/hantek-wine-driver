@@ -13,7 +13,8 @@ VENDOR_REQUEST=0x40
 DEVICE_TO_HOST=0x80
 
 def debug(*args, **kwargs):
-    pass
+    return
+    print(args, kwargs)
 
 class Device:
     def __init__(self):

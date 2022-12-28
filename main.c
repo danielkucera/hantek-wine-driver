@@ -32,6 +32,7 @@
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <netinet/tcp.h>
 
 #include <errno.h>
 #include <stdlib.h>
@@ -145,6 +146,9 @@ int hantek_connect(void) {
         ERR("Connection Failed\n");
         return -1;
     }
+
+    int flag = 1;
+    setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int));
 
     return 0;
 }

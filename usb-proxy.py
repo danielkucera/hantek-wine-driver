@@ -118,6 +118,7 @@ def process_cmd(io_num, indata, outdata):
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.setsockopt( socket.IPPROTO_TCP, socket.TCP_NODELAY, 1 )
     s.bind((HOST, PORT))
     s.listen()
 
@@ -134,7 +135,7 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                     debug(cmd_head)
                     in_data = conn.recv(in_len)
                     out_data = conn.recv(out_len)
-        
+
                     (status, in_data, out_data) = process_cmd(io_num, in_data, out_data)
                     res_head = struct.pack("<BHH", status, len(in_data), len(out_data))
                     debug("sending", res_head)

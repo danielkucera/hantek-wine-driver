@@ -1,6 +1,6 @@
 MODULE    = hantek.sys
 IMPORTS   = ntoskrnl usb-1.0.
-EXTRAINCL = -I/usr/include/ -I../../include/
+EXTRAINCL = -I/usr/include/ -I/usr/include/wine -I/usr/include/wine/wine/windows
 
 EXTRADLLFLAGS = -Wl,--subsystem,native
 
